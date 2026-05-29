@@ -1,0 +1,5 @@
+DROP TABLE IF EXISTS context_entries;
+DROP TABLE IF EXISTS sessions;
+DROP TABLE IF EXISTS tickets;
+DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS workspaces;
