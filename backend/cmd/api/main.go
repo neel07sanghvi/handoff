@@ -9,6 +9,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/neelsanghvi/handoff/backend/internal/config"
 	"github.com/neelsanghvi/handoff/backend/internal/db"
+	"github.com/neelsanghvi/handoff/backend/internal/http/handlers"
+	"github.com/neelsanghvi/handoff/backend/internal/middleware"
 )
 
 func main() {
@@ -25,6 +27,8 @@ func main() {
 	defer dbpool.Close()
 
 	r := chi.NewRouter()
+	authHandler := handlers.NewAuthHandler(dbpool, cfg.JWTSecret)
+	ticketHandler := handlers.NewTicketHandler(dbpool)
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -32,6 +36,17 @@ func main() {
 			"status":   "ok",
 			"database": "connected",
 		})
+	})
+
+	r.Post("/api/auth/register", authHandler.Register)
+	r.Post("/api/auth/login", authHandler.Login)
+
+	r.Route("/api", func(r chi.Router) {
+		r.Use(middleware.Auth(cfg.JWTSecret))
+		r.Get("/me", authHandler.Me)
+		r.Post("/tickets", ticketHandler.Create)
+		r.Get("/tickets", ticketHandler.List)
+		r.Get("/tickets/{id}", ticketHandler.Get)
 	})
 
 	log.Println("API running on http://localhost:" + cfg.Port)
