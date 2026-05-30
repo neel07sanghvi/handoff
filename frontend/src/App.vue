@@ -2,13 +2,23 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import * as api from './api'
 
+type Stage = 'tickets' | 'sessions' | 'entries' | 'handoff' | 'search'
+
 const entryTypes = ['decision', 'tried_failed', 'bug_fixed', 'warning', 'prompt', 'context']
 const ticketSources = ['manual', 'github', 'linear', 'jira']
+const stages: Array<{ id: Stage; label: string }> = [
+  { id: 'tickets', label: 'Tickets' },
+  { id: 'sessions', label: 'Sessions' },
+  { id: 'entries', label: 'Entries' },
+  { id: 'handoff', label: 'Handoff' },
+  { id: 'search', label: 'Search' },
+]
 
 const token = ref(localStorage.getItem('handoff_token') ?? '')
 const user = ref<api.User | null>(null)
 const workspace = ref<api.Workspace | null>(null)
 const authMode = ref<'login' | 'register'>('login')
+const activeStage = ref<Stage>('tickets')
 const errorMessage = ref('')
 const notice = ref('')
 const loading = ref(false)
@@ -37,8 +47,6 @@ const registerForm = reactive({
 const ticketForm = reactive({
   external_id: '',
   title: '',
-  description: '',
-  url: '',
   source: 'manual',
 })
 
@@ -111,7 +119,26 @@ function logout() {
   selectedTicketID.value = ''
   selectedSessionID.value = ''
   handoffContent.value = ''
+  activeStage.value = 'tickets'
   localStorage.removeItem('handoff_token')
+}
+
+function stageDisabled(stage: Stage) {
+  if (stage === 'sessions' || stage === 'handoff') {
+    return !selectedTicket.value
+  }
+
+  if (stage === 'entries') {
+    return !selectedSession.value
+  }
+
+  return false
+}
+
+function setStage(stage: Stage) {
+  if (!stageDisabled(stage)) {
+    activeStage.value = stage
+  }
 }
 
 async function handleLogin() {
@@ -150,13 +177,15 @@ async function loadTickets() {
   tickets.value = await api.listTickets(token.value)
   if (tickets.value.length === 0) {
     selectedTicketID.value = ''
+    selectedSessionID.value = ''
     sessions.value = []
     entries.value = []
+    activeStage.value = 'tickets'
     return
   }
 
   const existingSelection = tickets.value.some((ticket) => ticket.id === selectedTicketID.value)
-  await selectTicket(existingSelection ? selectedTicketID.value : tickets.value[0].id)
+  await selectTicket(existingSelection ? selectedTicketID.value : tickets.value[0].id, false)
 }
 
 async function createTicket() {
@@ -169,15 +198,11 @@ async function createTicket() {
     const ticket = await api.createTicket(token.value, {
       external_id: ticketForm.external_id || undefined,
       title: ticketForm.title,
-      description: ticketForm.description || undefined,
-      url: ticketForm.url || undefined,
       source: ticketForm.source,
     })
     tickets.value = [ticket, ...tickets.value]
     ticketForm.external_id = ''
     ticketForm.title = ''
-    ticketForm.description = ''
-    ticketForm.url = ''
     ticketForm.source = 'manual'
     await selectTicket(ticket.id)
     setNotice('Ticket created')
@@ -188,7 +213,7 @@ async function createTicket() {
   }
 }
 
-async function selectTicket(ticketID: string) {
+async function selectTicket(ticketID: string, moveNext = true) {
   if (!token.value || !ticketID) {
     return
   }
@@ -198,8 +223,13 @@ async function selectTicket(ticketID: string) {
   entries.value = []
   handoffContent.value = ''
   sessions.value = await api.listSessions(token.value, ticketID)
+
   if (sessions.value.length > 0) {
-    await selectSession(sessions.value[0].id)
+    await selectSession(sessions.value[0].id, false)
+  }
+
+  if (moveNext) {
+    activeStage.value = 'sessions'
   }
 }
 
@@ -226,7 +256,7 @@ async function createSession() {
   }
 }
 
-async function selectSession(sessionID: string) {
+async function selectSession(sessionID: string, moveNext = true) {
   if (!token.value || !sessionID) {
     return
   }
@@ -234,6 +264,10 @@ async function selectSession(sessionID: string) {
   selectedSessionID.value = sessionID
   editingEntryID.value = ''
   entries.value = await api.listEntries(token.value, sessionID)
+
+  if (moveNext) {
+    activeStage.value = 'entries'
+  }
 }
 
 async function completeSession() {
@@ -315,6 +349,7 @@ async function generateHandoff() {
   try {
     const handoff = await api.getHandoff(token.value, selectedTicket.value.id)
     handoffContent.value = handoff.content
+    activeStage.value = 'handoff'
     setNotice('Handoff generated')
   } catch (error) {
     setError(error)
@@ -377,25 +412,46 @@ function typeLabel(value: string) {
     <div v-if="errorMessage" class="alert error">{{ errorMessage }}</div>
     <div v-if="notice" class="alert notice">{{ notice }}</div>
 
-    <section class="workspace-grid">
-      <aside class="rail">
-        <form class="stack" @submit.prevent="createTicket">
-          <h2>Tickets</h2>
+    <section class="workflow">
+      <nav class="steps" aria-label="Workflow">
+        <button
+          v-for="(stage, index) in stages"
+          :key="stage.id"
+          :class="{ active: activeStage === stage.id }"
+          :disabled="stageDisabled(stage.id)"
+          type="button"
+          @click="setStage(stage.id)"
+        >
+          <span>{{ index + 1 }}</span>
+          {{ stage.label }}
+        </button>
+      </nav>
+
+      <div class="selection-bar">
+        <span>{{ selectedTicket?.external_id || selectedTicket?.title || 'No ticket selected' }}</span>
+        <span>{{ selectedSession?.title || 'No session selected' }}</span>
+      </div>
+
+      <section v-if="activeStage === 'tickets'" class="stage-card">
+        <div class="stage-header">
+          <h1>Tickets</h1>
+          <span>{{ tickets.length }} total</span>
+        </div>
+
+        <form class="simple-form" @submit.prevent="createTicket">
           <input v-model="ticketForm.external_id" placeholder="TICKET-47" />
-          <input v-model="ticketForm.title" placeholder="Title" required />
-          <textarea v-model="ticketForm.description" placeholder="Description" rows="3" />
-          <input v-model="ticketForm.url" placeholder="URL" />
+          <input v-model="ticketForm.title" placeholder="Ticket title" required />
           <select v-model="ticketForm.source">
             <option v-for="source in ticketSources" :key="source" :value="source">{{ source }}</option>
           </select>
           <button type="submit" :disabled="loading">Create ticket</button>
         </form>
 
-        <div class="list">
+        <div class="item-list">
           <button
             v-for="ticket in tickets"
             :key="ticket.id"
-            class="ticket-item"
+            class="item-row"
             :class="{ active: ticket.id === selectedTicketID }"
             type="button"
             @click="selectTicket(ticket.id)"
@@ -404,108 +460,107 @@ function typeLabel(value: string) {
             <strong>{{ ticket.title }}</strong>
           </button>
         </div>
-      </aside>
+      </section>
 
-      <section class="detail">
-        <div v-if="selectedTicket" class="ticket-heading">
-          <div>
-            <span>{{ selectedTicket.external_id || selectedTicket.source }}</span>
-            <h1>{{ selectedTicket.title }}</h1>
-          </div>
-          <button type="button" @click="generateHandoff">Generate handoff</button>
+      <section v-if="activeStage === 'sessions'" class="stage-card">
+        <div class="stage-header">
+          <h1>Sessions</h1>
+          <button type="button" :disabled="!selectedTicket" @click="generateHandoff">Handoff</button>
         </div>
 
-        <div v-if="selectedTicket" class="work-columns">
-          <section class="panel">
-            <form class="stack compact" @submit.prevent="createSession">
-              <h2>Sessions</h2>
-              <input v-model="sessionForm.title" placeholder="Session title" required />
-              <textarea v-model="sessionForm.goal" placeholder="Goal" rows="3" />
-              <button type="submit" :disabled="loading">Start session</button>
-            </form>
+        <form class="simple-form" @submit.prevent="createSession">
+          <input v-model="sessionForm.title" placeholder="Session title" required />
+          <textarea v-model="sessionForm.goal" placeholder="Goal" rows="3" />
+          <button type="submit" :disabled="loading || !selectedTicket">Start session</button>
+        </form>
 
-            <div class="list">
-              <button
-                v-for="session in sessions"
-                :key="session.id"
-                class="session-item"
-                :class="{ active: session.id === selectedSessionID }"
-                type="button"
-                @click="selectSession(session.id)"
-              >
-                <strong>{{ session.title }}</strong>
-                <span>{{ session.status }} · {{ formatDate(session.created_at) }}</span>
-              </button>
-            </div>
-          </section>
+        <div class="item-list">
+          <button
+            v-for="session in sessions"
+            :key="session.id"
+            class="item-row"
+            :class="{ active: session.id === selectedSessionID }"
+            type="button"
+            @click="selectSession(session.id)"
+          >
+            <span>{{ session.status }} · {{ formatDate(session.created_at) }}</span>
+            <strong>{{ session.title }}</strong>
+          </button>
+        </div>
+      </section>
 
-          <section class="panel">
-            <div class="section-title">
-              <h2>Entries</h2>
-              <button
-                v-if="selectedSession && selectedSession.status !== 'completed'"
-                class="secondary"
-                type="button"
-                @click="completeSession"
-              >
-                Complete
-              </button>
-            </div>
+      <section v-if="activeStage === 'entries'" class="stage-card">
+        <div class="stage-header">
+          <h1>Entries</h1>
+          <button
+            class="secondary"
+            type="button"
+            :disabled="!selectedSession || selectedSession.status === 'completed'"
+            @click="completeSession"
+          >
+            Complete session
+          </button>
+        </div>
 
-            <form v-if="selectedSession" class="stack compact" @submit.prevent="createEntry">
-              <select v-model="entryForm.type">
+        <form class="entry-form" @submit.prevent="createEntry">
+          <select v-model="entryForm.type">
+            <option v-for="entryType in entryTypes" :key="entryType" :value="entryType">
+              {{ typeLabel(entryType) }}
+            </option>
+          </select>
+          <textarea v-model="entryForm.content" placeholder="Context entry" rows="5" required />
+          <button type="submit" :disabled="loading || !selectedSession">Add entry</button>
+        </form>
+
+        <div class="entry-list">
+          <article v-for="entry in entries" :key="entry.id" class="entry-card">
+            <template v-if="editingEntryID === entry.id">
+              <select v-model="entryEditForm.type">
                 <option v-for="entryType in entryTypes" :key="entryType" :value="entryType">
                   {{ typeLabel(entryType) }}
                 </option>
               </select>
-              <textarea v-model="entryForm.content" placeholder="Context entry" rows="5" required />
-              <button type="submit" :disabled="loading">Add entry</button>
-            </form>
-
-            <div class="entry-list">
-              <article v-for="entry in entries" :key="entry.id" class="entry-card">
-                <template v-if="editingEntryID === entry.id">
-                  <select v-model="entryEditForm.type">
-                    <option v-for="entryType in entryTypes" :key="entryType" :value="entryType">
-                      {{ typeLabel(entryType) }}
-                    </option>
-                  </select>
-                  <textarea v-model="entryEditForm.content" rows="5" />
-                  <div class="row-actions">
-                    <button type="button" @click="saveEntryEdit">Save</button>
-                    <button class="secondary" type="button" @click="editingEntryID = ''">Cancel</button>
-                  </div>
-                </template>
-                <template v-else>
-                  <div class="entry-meta">
-                    <span>{{ typeLabel(entry.type) }}</span>
-                    <time>{{ formatDate(entry.created_at) }}</time>
-                  </div>
-                  <p>{{ entry.content }}</p>
-                  <div class="row-actions">
-                    <button class="secondary" type="button" @click="startEditEntry(entry)">Edit</button>
-                    <button class="danger" type="button" @click="deleteEntry(entry.id)">Delete</button>
-                  </div>
-                </template>
-              </article>
-            </div>
-          </section>
+              <textarea v-model="entryEditForm.content" rows="5" />
+              <div class="row-actions">
+                <button type="button" @click="saveEntryEdit">Save</button>
+                <button class="secondary" type="button" @click="editingEntryID = ''">Cancel</button>
+              </div>
+            </template>
+            <template v-else>
+              <div class="entry-meta">
+                <span>{{ typeLabel(entry.type) }}</span>
+                <time>{{ formatDate(entry.created_at) }}</time>
+              </div>
+              <p>{{ entry.content }}</p>
+              <div class="row-actions">
+                <button class="secondary" type="button" @click="startEditEntry(entry)">Edit</button>
+                <button class="danger" type="button" @click="deleteEntry(entry.id)">Delete</button>
+              </div>
+            </template>
+          </article>
         </div>
+      </section>
 
-        <section v-if="selectedTicket" class="handoff-band">
-          <div class="section-title">
-            <h2>Handoff</h2>
+      <section v-if="activeStage === 'handoff'" class="stage-card">
+        <div class="stage-header">
+          <h1>Handoff</h1>
+          <div class="row-actions">
+            <button type="button" :disabled="!selectedTicket" @click="generateHandoff">Generate</button>
             <button class="secondary" type="button" :disabled="!handoffContent" @click="copyHandoff">
               Copy
             </button>
           </div>
-          <pre>{{ handoffContent }}</pre>
-        </section>
+        </div>
+        <pre>{{ handoffContent }}</pre>
       </section>
 
-      <aside class="rail">
-        <form class="stack" @submit.prevent="runSearch">
-          <h2>Search</h2>
+      <section v-if="activeStage === 'search'" class="stage-card">
+        <div class="stage-header">
+          <h1>Search</h1>
+          <span>{{ searchResults.length }} results</span>
+        </div>
+
+        <form class="simple-form" @submit.prevent="runSearch">
           <input v-model="searchForm.q" placeholder="jwt" required />
           <select v-model="searchForm.type">
             <option value="">all types</option>
@@ -526,7 +581,7 @@ function typeLabel(value: string) {
             <p>{{ result.content }}</p>
           </article>
         </div>
-      </aside>
+      </section>
     </section>
   </main>
 
