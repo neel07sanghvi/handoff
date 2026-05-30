@@ -30,6 +30,7 @@ func main() {
 	authHandler := handlers.NewAuthHandler(dbpool, cfg.JWTSecret)
 	ticketHandler := handlers.NewTicketHandler(dbpool)
 	sessionHandler := handlers.NewSessionHandler(dbpool)
+	entryHandler := handlers.NewEntryHandler(dbpool)
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -51,6 +52,9 @@ func main() {
 		r.Post("/tickets/{id}/sessions", sessionHandler.Create)
 		r.Get("/sessions/{id}", sessionHandler.Get)
 		r.Patch("/sessions/{id}", sessionHandler.Update)
+		r.Post("/sessions/{id}/entries", entryHandler.Create)
+		r.Patch("/entries/{id}", entryHandler.Update)
+		r.Delete("/entries/{id}", entryHandler.Delete)
 	})
 
 	log.Println("API running on http://localhost:" + cfg.Port)
