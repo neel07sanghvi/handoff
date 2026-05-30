@@ -31,6 +31,7 @@ func main() {
 	ticketHandler := handlers.NewTicketHandler(dbpool)
 	sessionHandler := handlers.NewSessionHandler(dbpool)
 	entryHandler := handlers.NewEntryHandler(dbpool)
+	handoffHandler := handlers.NewHandoffHandler(dbpool)
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -49,6 +50,7 @@ func main() {
 		r.Post("/tickets", ticketHandler.Create)
 		r.Get("/tickets", ticketHandler.List)
 		r.Get("/tickets/{id}", ticketHandler.Get)
+		r.Get("/tickets/{id}/handoff", handoffHandler.Generate)
 		r.Post("/tickets/{id}/sessions", sessionHandler.Create)
 		r.Get("/sessions/{id}", sessionHandler.Get)
 		r.Patch("/sessions/{id}", sessionHandler.Update)
