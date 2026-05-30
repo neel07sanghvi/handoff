@@ -32,6 +32,7 @@ func main() {
 	sessionHandler := handlers.NewSessionHandler(dbpool)
 	entryHandler := handlers.NewEntryHandler(dbpool)
 	handoffHandler := handlers.NewHandoffHandler(dbpool)
+	searchHandler := handlers.NewSearchHandler(dbpool)
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -47,6 +48,7 @@ func main() {
 	r.Route("/api", func(r chi.Router) {
 		r.Use(middleware.Auth(cfg.JWTSecret))
 		r.Get("/me", authHandler.Me)
+		r.Get("/search", searchHandler.Search)
 		r.Post("/tickets", ticketHandler.Create)
 		r.Get("/tickets", ticketHandler.List)
 		r.Get("/tickets/{id}", ticketHandler.Get)
