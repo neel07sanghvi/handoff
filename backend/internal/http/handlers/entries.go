@@ -98,6 +98,50 @@ func (h *EntryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, entry)
 }
 
+func (h *EntryHandler) ListForSession(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := middleware.WorkspaceIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "missing authenticated workspace")
+		return
+	}
+
+	sessionID := chi.URLParam(r, "id")
+	rows, err := h.db.Query(r.Context(), `
+		SELECT ce.id::text, ce.session_id::text, ce.user_id::text, ce.type, ce.content, ce.created_at, ce.updated_at
+		FROM context_entries ce
+		JOIN sessions s ON s.id = ce.session_id
+		JOIN tickets t ON t.id = s.ticket_id
+		WHERE s.id = $1 AND t.workspace_id = $2
+		ORDER BY ce.created_at DESC, ce.id DESC
+	`, sessionID, workspaceID)
+	if err != nil {
+		if isInvalidUUID(err) {
+			writeError(w, http.StatusBadRequest, "invalid session id")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "could not list entries")
+		return
+	}
+	defer rows.Close()
+
+	entries := []entryResponse{}
+	for rows.Next() {
+		entry, err := scanEntry(rows)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not read entry")
+			return
+		}
+		entries = append(entries, entry)
+	}
+
+	if err := rows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not read entries")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, entries)
+}
+
 func (h *EntryHandler) Update(w http.ResponseWriter, r *http.Request) {
 	workspaceID, ok := middleware.WorkspaceIDFromContext(r.Context())
 	if !ok {
