@@ -69,7 +69,15 @@ func (h *SearchHandler) Search(w http.ResponseWriter, r *http.Request) {
 		JOIN tickets t ON t.id = s.ticket_id
 		JOIN users u ON u.id = ce.user_id
 		WHERE t.workspace_id = $1
-			AND ce.content ILIKE '%' || $2 || '%'
+			AND (
+				ce.content ILIKE '%' || $2 || '%'
+				OR t.title ILIKE '%' || $2 || '%'
+				OR COALESCE(t.external_id, '') ILIKE '%' || $2 || '%'
+				OR COALESCE(t.description, '') ILIKE '%' || $2 || '%'
+				OR s.title ILIKE '%' || $2 || '%'
+				OR COALESCE(s.goal, '') ILIKE '%' || $2 || '%'
+				OR COALESCE(s.summary, '') ILIKE '%' || $2 || '%'
+			)
 			AND ($3::text = '' OR ce.type = $3)
 		ORDER BY ce.created_at DESC, ce.id DESC
 	`, workspaceID, query, entryType)
